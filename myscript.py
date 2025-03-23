@@ -6,38 +6,18 @@ from datetime import datetime, timedelta
 
 num_days = 30
 subject_ids = [
-    1503960366,
-    1624580081,
-    1644430081,
-    1844505072,
-    1927972279,
     2022484408,
     2026352035,
-    2320127002,
     2347167796,
-    2873212765,
-    2891001357,
-    3372868164,
-    3977333714,
     4020332650,
-    4057192912,
-    4319703577,
-    4445114986,
     4558609924,
-    4702921684,
     5553957443,
     5577150313,
     6117666160,
-    6290855005,
     6391747486,
     6775888955,
     6962181067,
     7007744171,
-    7086361926,
-    8053475328,
-    8253242879,
-    8378563200,
-    8583815059,
     8792009665,
     8877689391,
 ]
@@ -105,6 +85,16 @@ df_syn_steps = pd.concat(syn_steps_frames, axis=0, ignore_index=True)
 df_syn_steps["data_type"] = 2
 df_syn_steps = df_syn_steps[["subject_id", "datetime", "reading", "data_type"]]
 
+#
+# Raw heartrate data
+#
+df_raw_hr = pd.read_csv("./fitabase/data/heartrate_seconds_merged.csv")
+df_raw_hr = df_raw_hr.rename(
+    columns={"Id": "subject_id", "Time": "datetime", "Value": "reading"}
+)
+df_raw_hr["data_type"] = 3
+df_raw_hr["datetime"] = df_raw_hr["datetime"].map(transform_date)
+
 
 db_params = {
     "dbname": "examples",
@@ -141,6 +131,10 @@ try:
             df_syn_steps.to_csv(buffer_syn_steps, index=False, header=False)
             buffer_syn_steps.seek(0)
 
+            buffer_raw_hr = io.StringIO()
+            df_raw_hr.to_csv(buffer_raw_hr, index=False, header=False)
+            buffer_raw_hr.seek(0)
+
             with cursor.copy(
                 "COPY readings (subject_id, datetime, reading, data_type) FROM STDIN WITH CSV"
             ) as copy:
@@ -148,6 +142,9 @@ try:
                     copy.write(data)
 
                 while data := buffer_syn_steps.read(512):
+                    copy.write(data)
+
+                while data := buffer_raw_hr.read(512):
                     copy.write(data)
 
 except Exception as e:
