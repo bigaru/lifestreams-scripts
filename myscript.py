@@ -4,35 +4,107 @@ import psycopg
 import io
 from datetime import datetime, timedelta
 
+num_days = 30
+subject_ids = [
+    1503960366,
+    1624580081,
+    1644430081,
+    1844505072,
+    1927972279,
+    2022484408,
+    2026352035,
+    2320127002,
+    2347167796,
+    2873212765,
+    2891001357,
+    3372868164,
+    3977333714,
+    4020332650,
+    4057192912,
+    4319703577,
+    4445114986,
+    4558609924,
+    4702921684,
+    5553957443,
+    5577150313,
+    6117666160,
+    6290855005,
+    6391747486,
+    6775888955,
+    6962181067,
+    7007744171,
+    7086361926,
+    8053475328,
+    8253242879,
+    8378563200,
+    8583815059,
+    8792009665,
+    8877689391,
+]
+
 
 def transform_date(date_str):
     date_obj = datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
 
     # Shift to '1/04/2025 12:00:00'
-    new_date = date_obj + timedelta(days=3222)
-    return new_date.timestamp()
+    new_date = date_obj + timedelta(days=3220)
+    return new_date
 
 
-# mean = 0  # Mean (μ)
-# std_dev = 1  # Standard deviation (σ)
-# sample_size = 10000
+def create_synthetic_steps(userId: int):
+    df = pd.read_csv("./fitabase/data/hourlySteps_merged.csv")
+    df["pyTime"] = pd.to_datetime(df["ActivityHour"], format="%m/%d/%Y %I:%M:%S %p")
 
-# data = np.random.normal(loc=mean, scale=std_dev, size=sample_size)
+    user_df = df[df["Id"] == userId]
 
-# time = pd.date_range(start="2025-01-01", periods=sample_size, freq="D")
-# time = time.strftime("%Y-%m-%d %H:%M:%S")
+    starting_date = pd.to_datetime("2025-02-05")
+    date_range = pd.date_range(start=starting_date, periods=24 * num_days, freq="h")
 
-# df = pd.DataFrame({"subject_id": 1, "data_type": 1, "datetime": time, "reading": data})
-# print(df.head(10))
+    df_synthetic = pd.DataFrame(date_range, columns=["datetime"])
+    df_synthetic["reading"] = 0
 
-df_steps = pd.read_csv("./fitabase/data/hourlySteps_merged.csv")
-df_steps = df_steps.rename(
+    synth_by_hour = {i: [] for i in range(24)}
+
+    for hour in range(0, 24):
+        df_hour = user_df[user_df["pyTime"].dt.hour == hour]
+
+        synthetic_data = np.random.normal(
+            df_hour["StepTotal"].mean(), df_hour["StepTotal"].std(), num_days
+        )
+        synthetic_data = np.nan_to_num(synthetic_data)
+        synthetic_data = np.abs(synthetic_data)
+        synthetic_data = synthetic_data.astype(int)
+
+        synth_by_hour[hour] = synthetic_data
+
+    for date in date_range:
+        no_day = (date - starting_date).days
+        df_synthetic.loc[df_synthetic["datetime"] == date, "reading"] = synth_by_hour[
+            date.hour
+        ][no_day]
+
+    df_synthetic["subject_id"] = userId
+    return df_synthetic
+
+
+#
+# Raw step data
+#
+df_raw_steps = pd.read_csv("./fitabase/data/hourlySteps_merged.csv")
+df_raw_steps = df_raw_steps.rename(
     columns={"Id": "subject_id", "ActivityHour": "datetime", "StepTotal": "reading"}
 )
-df_steps["data_type"] = 2
-df_steps["datetime"] = df_steps["datetime"].map(transform_date)
+df_raw_steps["data_type"] = 2
+df_raw_steps["datetime"] = df_raw_steps["datetime"].map(transform_date)
 
-print(df_steps.head(10))
+#
+# Synthetic step data
+#
+syn_steps_frames = [create_synthetic_steps(subject) for subject in subject_ids]
+df_syn_steps = pd.concat(syn_steps_frames, axis=0, ignore_index=True)
+df_syn_steps["data_type"] = 2
+df_syn_steps = df_syn_steps[["subject_id", "datetime", "reading", "data_type"]]
+
 
 db_params = {
     "dbname": "examples",
@@ -54,21 +126,28 @@ try:
                 id SERIAL PRIMARY KEY,
                 subject_id BIGINT,
                 data_type INT,
-                datetime DOUBLE PRECISION,
+                datetime TIMESTAMP,
                 reading DOUBLE PRECISION
             );
             """
 
             cursor.execute(create_table_query)
 
-            buffer = io.StringIO()
-            df_steps.to_csv(buffer, index=False, header=False)
-            buffer.seek(0)
+            buffer_raw_steps = io.StringIO()
+            df_raw_steps.to_csv(buffer_raw_steps, index=False, header=False)
+            buffer_raw_steps.seek(0)
+
+            buffer_syn_steps = io.StringIO()
+            df_syn_steps.to_csv(buffer_syn_steps, index=False, header=False)
+            buffer_syn_steps.seek(0)
 
             with cursor.copy(
                 "COPY readings (subject_id, datetime, reading, data_type) FROM STDIN WITH CSV"
             ) as copy:
-                while data := buffer.read(512):
+                while data := buffer_raw_steps.read(512):
+                    copy.write(data)
+
+                while data := buffer_syn_steps.read(512):
                     copy.write(data)
 
 except Exception as e:
