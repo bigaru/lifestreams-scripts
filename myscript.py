@@ -52,7 +52,7 @@ def create_synthetic_steps(userId: int):
             df_hour["StepTotal"].mean(), df_hour["StepTotal"].std(), num_days
         )
         synthetic_data = np.nan_to_num(synthetic_data)
-        synthetic_data = np.abs(synthetic_data)
+        synthetic_data = np.clip(synthetic_data, a_min=0, a_max=None)
         synthetic_data = synthetic_data.astype(int)
 
         synth_by_hour[hour] = synthetic_data
@@ -77,6 +77,8 @@ df_raw_steps = df_raw_steps.rename(
 df_raw_steps["data_type"] = 2
 df_raw_steps["datetime"] = df_raw_steps["datetime"].map(transform_date)
 
+df_raw_steps = df_raw_steps[df_raw_steps["subject_id"].isin(subject_ids)]
+
 #
 # Synthetic step data
 #
@@ -94,6 +96,20 @@ df_raw_hr = df_raw_hr.rename(
 )
 df_raw_hr["data_type"] = 3
 df_raw_hr["datetime"] = df_raw_hr["datetime"].map(transform_date)
+
+#
+# Raw sleep data
+#
+df_raw_sleep = pd.read_csv("./fitabase/data/minuteSleep_merged.csv")
+df_raw_sleep = df_raw_sleep.drop("logId", axis=1)
+
+df_raw_sleep = df_raw_sleep.rename(
+    columns={"Id": "subject_id", "date": "datetime", "value": "reading"}
+)
+df_raw_sleep["data_type"] = 4
+df_raw_sleep["datetime"] = df_raw_sleep["datetime"].map(transform_date)
+
+df_raw_sleep = df_raw_sleep[df_raw_sleep["subject_id"].isin(subject_ids)]
 
 
 db_params = {
@@ -135,6 +151,10 @@ try:
             df_raw_hr.to_csv(buffer_raw_hr, index=False, header=False)
             buffer_raw_hr.seek(0)
 
+            buffer_raw_sleep = io.StringIO()
+            df_raw_sleep.to_csv(buffer_raw_sleep, index=False, header=False)
+            buffer_raw_sleep.seek(0)
+
             with cursor.copy(
                 "COPY readings (subject_id, datetime, reading, data_type) FROM STDIN WITH CSV"
             ) as copy:
@@ -145,6 +165,9 @@ try:
                     copy.write(data)
 
                 while data := buffer_raw_hr.read(512):
+                    copy.write(data)
+
+                while data := buffer_raw_sleep.read(512):
                     copy.write(data)
 
 except Exception as e:
