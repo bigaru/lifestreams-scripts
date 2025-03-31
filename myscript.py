@@ -67,6 +67,58 @@ def create_synthetic_steps(userId: int):
     return df_synthetic
 
 
+def create_synthetic_sleep(userId: int):
+    df = pd.read_csv("./fitabase/data/minuteSleep_merged.csv")
+    df["pyTime"] = pd.to_datetime(df["date"], format="%m/%d/%Y %I:%M:%S %p")
+
+    user_df = df[df["Id"] == userId]
+
+    user_df = (
+        user_df.groupby(pd.Grouper(key="pyTime", freq="h"))
+        .agg(
+            {
+                "Id": "first",
+                "date": "first",
+                "value": "sum",
+                "logId": "first",
+            }
+        )
+        .reset_index()
+    )
+
+    user_df["Id"] = user_df["Id"].fillna(0).astype(int)
+    user_df["logId"] = user_df["logId"].fillna(0).astype(int)
+
+    starting_date = pd.to_datetime("2025-02-05")
+    date_range = pd.date_range(start=starting_date, periods=24 * num_days, freq="h")
+
+    df_synthetic = pd.DataFrame(date_range, columns=["datetime"])
+    df_synthetic["reading"] = 0
+
+    synth_by_hour = {i: [] for i in range(24)}
+
+    for hour in range(0, 24):
+        df_hour = user_df[user_df["pyTime"].dt.hour == hour]
+
+        synthetic_data = np.random.normal(
+            df_hour["value"].mean(), df_hour["value"].std(), num_days
+        )
+        synthetic_data = np.nan_to_num(synthetic_data)
+        synthetic_data = np.clip(synthetic_data, a_min=0, a_max=None)
+        synthetic_data = synthetic_data.astype(int)
+
+        synth_by_hour[hour] = synthetic_data
+
+    for date in date_range:
+        no_day = (date - starting_date).days
+        df_synthetic.loc[df_synthetic["datetime"] == date, "reading"] = synth_by_hour[
+            date.hour
+        ][no_day]
+
+    df_synthetic["subject_id"] = userId
+    return df_synthetic
+
+
 #
 # Raw step data
 #
@@ -110,6 +162,14 @@ df_raw_sleep["data_type"] = 4
 df_raw_sleep["datetime"] = df_raw_sleep["datetime"].map(transform_date)
 
 df_raw_sleep = df_raw_sleep[df_raw_sleep["subject_id"].isin(subject_ids)]
+
+#
+# Synthetic sleep data
+#
+syn_sleep_frames = [create_synthetic_sleep(subject) for subject in subject_ids]
+df_syn_sleep = pd.concat(syn_sleep_frames, axis=0, ignore_index=True)
+df_syn_sleep["data_type"] = 4
+df_syn_sleep = df_syn_sleep[["subject_id", "datetime", "reading", "data_type"]]
 
 
 db_params = {
@@ -155,6 +215,10 @@ try:
             df_raw_sleep.to_csv(buffer_raw_sleep, index=False, header=False)
             buffer_raw_sleep.seek(0)
 
+            buffer_syn_sleep = io.StringIO()
+            df_syn_sleep.to_csv(buffer_syn_sleep, index=False, header=False)
+            buffer_syn_sleep.seek(0)
+
             with cursor.copy(
                 "COPY readings (subject_id, datetime, reading, data_type) FROM STDIN WITH CSV"
             ) as copy:
@@ -168,6 +232,9 @@ try:
                     copy.write(data)
 
                 while data := buffer_raw_sleep.read(512):
+                    copy.write(data)
+
+                while data := buffer_syn_sleep.read(512):
                     copy.write(data)
 
 except Exception as e:
