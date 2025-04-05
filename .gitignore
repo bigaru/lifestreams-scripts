@@ -131,6 +131,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+tf/
 
 # Spyder project settings
 .spyderproject
@@ -176,3 +177,5 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 data/
+
+rawhr/
