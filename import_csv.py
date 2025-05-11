@@ -5,30 +5,12 @@ import io
 from datetime import datetime, timedelta
 import glob
 
-num_days = 30
-subject_ids = [
-    2022484408,
-    2026352035,
-    2347167796,
-    4020332650,
-    4558609924,
-    5553957443,
-    5577150313,
-    6117666160,
-    6391747486,
-    6775888955,
-    6962181067,
-    7007744171,
-    8792009665,
-    8877689391,
-]
-
 
 db_params = {
     "dbname": "examples",
     "user": "examples",
     "password": "examples",
-    "host": "db",
+    "host": "172.23.208.124",
     "port": 5432,
 }
 
